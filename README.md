@@ -81,6 +81,7 @@ npm start
 ```bash
 status.bat    # 是否运行 / Base URL / 当前 API Key / 账号 / 余额
 stop.bat      # 停止服务并阻止自动重启
+selftest.bat  # 协议自检：SSE 帧格式、流式状态机、finish_reason、多轮上下文
 ```
 
 > 客户端突然报「连接失败 / fetch failed / ECONNREFUSED」基本都是服务没在跑，先执行 `status.bat` 确认。

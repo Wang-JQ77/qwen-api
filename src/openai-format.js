@@ -77,13 +77,13 @@ export function buildOpenAIResponse({ id, model, content, reasoning, usage, fini
   };
 }
 
-/** Shape one OpenAI stream chunk. deltaFields: { content?, reasoning_content?, finish_reason? } */
-export function buildOpenAIStreamChunk({ id, model, delta }) {
+/** Shape one OpenAI stream chunk. finish_reason belongs to the choice, not the delta. */
+export function buildOpenAIStreamChunk({ id, model, delta, finishReason = null }) {
   return {
     id,
     object: 'chat.completion.chunk',
     created: Math.floor(Date.now() / 1000),
     model,
-    choices: [{ index: 0, delta, finish_reason: delta?.finish_reason ?? null }],
+    choices: [{ index: 0, delta: delta ?? {}, finish_reason: finishReason }],
   };
 }

@@ -220,24 +220,32 @@ export function startServer(options = {}) {
         try { res.write(s); return true; } catch { return false; }
       };
       let finishSent = false;
+      let stopReasonSent = false;
       const sendDone = () => {
         if (finishSent) return;
         finishSent = true;
+        // always give clients a stop reason before [DONE]
+        if (!stopReasonSent) {
+          stopReasonSent = true;
+          write(`data: ${JSON.stringify(buildOpenAIStreamChunk({ id, model: modelKey, delta: {}, finishReason: 'stop' }))}\n\n`);
+        }
         write('data: [DONE]\n\n');
         try { res.end(); } catch { /* already closed */ }
       };
       try {
         await client.consumeSSE(upstream, {
           onChunk: (chunk) => {
-            const delta = chunk?.choices?.[0]?.delta;
-            if (!delta) return;
+            const choice = chunk?.choices?.[0];
+            if (!choice) return;
+            const delta = choice.delta || {};
+            const finishReason = choice.finish_reason ?? null;
             const outDelta = {};
             if (delta.content) outDelta.content = delta.content;
             if (delta.reasoning_content) outDelta.reasoning_content = delta.reasoning_content;
             if (delta.role) outDelta.role = delta.role;
-            if (delta.finish_reason) outDelta.finish_reason = delta.finish_reason;
-            if (Object.keys(outDelta).length === 0) return;
-            const outChunk = buildOpenAIStreamChunk({ id, model: modelKey, delta: outDelta });
+            if (Object.keys(outDelta).length === 0 && !finishReason) return;
+            if (finishReason) stopReasonSent = true;
+            const outChunk = buildOpenAIStreamChunk({ id, model: modelKey, delta: outDelta, finishReason });
             write(`data: ${JSON.stringify(outChunk)}\n\n`);
           },
           onUsage: (usage) => {
@@ -322,22 +330,23 @@ export function startServer(options = {}) {
       try {
         await client.consumeSSE(upstream, {
           onChunk: (chunk) => {
-            const delta = chunk?.choices?.[0]?.delta;
-            if (!delta) return;
+            const choice = chunk?.choices?.[0];
+            if (!choice) return;
+            const delta = choice.delta || {};
             const d = {};
             if (delta.content) d.content = delta.content;
             if (delta.reasoning_content) d.reasoning_content = delta.reasoning_content;
-            if (delta.finish_reason) d.finish_reason = delta.finish_reason;
+            if (choice.finish_reason) d.finish_reason = choice.finish_reason;
             if (Object.keys(d).length === 0) return;
-            for (const line of adapter.push(d)) write(line);
+            for (const block of adapter.push(d)) write(block);
           },
           onUsage: (u) => { adapter.usage = u; },
         });
-        for (const line of adapter.finish()) write(line);
+        for (const block of adapter.finish()) write(block);
         try { res.end(); } catch { /* already closed */ }
       } catch {
         try {
-          for (const line of adapter.finish()) write(line);
+          for (const block of adapter.finish()) write(block);
           res.end();
         } catch { /* already closed */ }
       }

@@ -23,6 +23,7 @@
     "run-loop.bat",
     "status.bat",
     "stop.bat",
+    "selftest.bat",
     "install-autostart.bat",
     "uninstall-autostart.bat",
     "cordis.patch.yml",
