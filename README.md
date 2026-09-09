@@ -28,7 +28,16 @@ Claude Code / Cursor / Cline / 任意 OpenAI 兼容客户端
 
 - **Windows**（账号凭据解密依赖系统 DPAPI）
 - **Node.js ≥ 18**（[nodejs.org](https://nodejs.org) 下载 LTS 安装即可）
-- **千问办公桌面端**已安装并登录过一次（之后可以关掉，推理不依赖桌面端在线）
+- **你的账号 uid**（获取方式见下）
+
+> **千问办公桌面端不是运行时依赖** —— 它只用来「领取」你的 uid：装上、登录一次、跑 `npm run setup` 看到 uid 即可卸载。之后代理独立运行，桌面端在不在线都不影响推理（签名只依赖 uid + wasm，已实测随机 machine-id 也可用）。
+
+**uid 获取方式（二选一）**：
+
+1. **装一次桌面端**：安装 → 登录 → `npm run setup`（自动解密出 uid 并显示）→ 之后可卸载
+2. **已知 uid 直接用**：`.env` 里设置 `QW_UID=你的uid`，配合 `QW_MACHINE_ID`（随便一个 UUID 也行）即可完全脱离桌面端运行
+
+> 注意：完全脱离桌面端时 `/health` 的积分余额显示可能失效（token 无法自动刷新），但**推理完全不受影响**。
 
 ### 三步启动
 
@@ -169,6 +178,7 @@ dsh plugin --profile <name> add qwen-api
 | 问题 | 处理 |
 |---|---|
 | 启动报"账号身份不可用" | 先在千问办公桌面端登录一次；或在 `.env` 设置 `QW_UID` 与 `QW_MACHINE_ID` |
+| 不装千问办公能用吗 | 能。`.env` 设置 `QW_UID`（从曾登录过的机器获取）即可；machine-id 随机值亦可，已实测 |
 | `node setup.js` 提示解密失败 | 确认桌面端已登录且为本机当前用户运行；RDP/其他用户会话下 DPAPI 解不开属正常 |
 | 客户端 401 | 检查 Key 是否与控制台打印一致；`~/.qwen-api/api-key.json` 删除后重启会换新 Key |
 | 上游 403 Model is not available | 该模型无权限，换 `pro` 或 `flash` |
