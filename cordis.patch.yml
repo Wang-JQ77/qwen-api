@@ -1,0 +1,21 @@
+# qwen-api bundle patch
+#
+# Mounts the plugin into the profile's loader entries. When installed via
+#
+#   dsh plugin --profile <name> add qwen-api
+#
+# the CLI reconciles dsh.profile.bundles and appends this patch, inserting the
+# plugin row below. The plugin starts the 千问办公 -> OpenAI/Anthropic proxy on
+# http://localhost:9221 (configurable via the `config` block).
+#
+# Example with custom port and API key:
+#
+#   - insert:
+#       - id: qwen-api
+#         name: 'qwen-api'
+#         config:
+#           port: 9221
+#           apiKey: my-secret-key
+- insert:
+    - id: qwen-api
+      name: 'qwen-api'

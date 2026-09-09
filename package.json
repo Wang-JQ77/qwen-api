@@ -1,0 +1,62 @@
+{
+  "name": "qwen-api",
+  "version": "1.0.0",
+  "description": "将千问办公 (QwenWorkCN) 积分转为本地 OpenAI / Anthropic 兼容 API，供 Claude Code、Cursor、Cline 等任意 agent 客户端调用",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "src",
+    "wasm",
+    "setup.js",
+    "start.bat",
+    "cordis.patch.yml",
+    ".env.example",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "setup": "node setup.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "dotenv": "^16.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wang-JQ77/qwen-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Wang-JQ77/qwen-api/issues"
+  },
+  "homepage": "https://github.com/Wang-JQ77/qwen-api#readme",
+  "keywords": [
+    "qwen-api",
+    "qwenwork",
+    "qoder",
+    "千问办公",
+    "openai",
+    "anthropic",
+    "claude-code",
+    "cursor",
+    "cline",
+    "proxy",
+    "llm"
+  ]
+}
