@@ -66,6 +66,25 @@ npm start
 
 > 首次运行可先执行 `npm run setup` 做环境自检；`node setup.js --test` 会额外跑一次真实推理冒烟测试（消耗约 0.01 积分）。
 
+### 让它一直运行（很重要）
+
+`npm start` 是**前台进程**，关掉窗口或终端就停了 —— 客户端会立刻报连接失败。三种常驻方式：
+
+| 方式 | 怎么做 | 特点 |
+|---|---|---|
+| 前台 | 双击 `start.bat` / `npm start` | 调试用，能看到实时日志，关窗即停 |
+| **后台常驻（推荐）** | 双击 `start-background.vbs` | 隐藏窗口，**崩溃自动重启**，日志写 `logs\server.log` |
+| **开机自启** | 双击 `install-autostart.bat` | 免管理员（写入用户启动文件夹），登录即拉起；`uninstall-autostart.bat` 移除 |
+
+随时查看状态或停止：
+
+```bash
+status.bat    # 是否运行 / Base URL / 当前 API Key / 账号 / 余额
+stop.bat      # 停止服务并阻止自动重启
+```
+
+> 客户端突然报「连接失败 / fetch failed / ECONNREFUSED」基本都是服务没在跑，先执行 `status.bat` 确认。
+
 ### 修改 API Key
 
 三种方式任选：
@@ -177,6 +196,7 @@ dsh plugin --profile <name> add qwen-api
 
 | 问题 | 处理 |
 |---|---|
+| 客户端报连接失败 / ECONNREFUSED | 服务没在跑：`status.bat` 查看，`start-background.vbs` 拉起 |
 | 启动报"账号身份不可用" | 先在千问办公桌面端登录一次；或在 `.env` 设置 `QW_UID` 与 `QW_MACHINE_ID` |
 | 不装千问办公能用吗 | 能。`.env` 设置 `QW_UID`（从曾登录过的机器获取）即可；machine-id 随机值亦可，已实测 |
 | `node setup.js` 提示解密失败 | 确认桌面端已登录且为本机当前用户运行；RDP/其他用户会话下 DPAPI 解不开属正常 |

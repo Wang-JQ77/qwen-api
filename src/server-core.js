@@ -213,14 +213,19 @@ export function startServer(options = {}) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
+      // never let a client disconnect crash the proxy
+      res.on('error', () => { /* socket gone */ });
+      const write = (s) => {
+        if (res.destroyed || res.writableEnded) return false;
+        try { res.write(s); return true; } catch { return false; }
+      };
       let finishSent = false;
       const sendDone = () => {
         if (finishSent) return;
         finishSent = true;
-        res.write('data: [DONE]\n\n');
-        res.end();
+        write('data: [DONE]\n\n');
+        try { res.end(); } catch { /* already closed */ }
       };
-      req.on('close', () => { /* client gone */ });
       try {
         await client.consumeSSE(upstream, {
           onChunk: (chunk) => {
@@ -233,7 +238,7 @@ export function startServer(options = {}) {
             if (delta.finish_reason) outDelta.finish_reason = delta.finish_reason;
             if (Object.keys(outDelta).length === 0) return;
             const outChunk = buildOpenAIStreamChunk({ id, model: modelKey, delta: outDelta });
-            res.write(`data: ${JSON.stringify(outChunk)}\n\n`);
+            write(`data: ${JSON.stringify(outChunk)}\n\n`);
           },
           onUsage: (usage) => {
             const outChunk = buildOpenAIStreamChunk({ id, model: modelKey, delta: {} });
@@ -242,12 +247,12 @@ export function startServer(options = {}) {
               completion_tokens: usage?.completion_tokens ?? 0,
               total_tokens: usage?.total_tokens ?? 0,
             };
-            res.write(`data: ${JSON.stringify(outChunk)}\n\n`);
+            write(`data: ${JSON.stringify(outChunk)}\n\n`);
           },
         });
         sendDone();
       } catch {
-        if (!finishSent) sendDone();
+        sendDone();
       }
       return;
     }
@@ -308,6 +313,11 @@ export function startServer(options = {}) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.flushHeaders();
+      res.on('error', () => { /* socket gone */ });
+      const write = (s) => {
+        if (res.destroyed || res.writableEnded) return false;
+        try { res.write(s); return true; } catch { return false; }
+      };
       const adapter = new AnthropicStreamAdapter({ id, model: modelKey });
       try {
         await client.consumeSSE(upstream, {
@@ -319,17 +329,17 @@ export function startServer(options = {}) {
             if (delta.reasoning_content) d.reasoning_content = delta.reasoning_content;
             if (delta.finish_reason) d.finish_reason = delta.finish_reason;
             if (Object.keys(d).length === 0) return;
-            for (const line of adapter.push(d)) res.write(line);
+            for (const line of adapter.push(d)) write(line);
           },
           onUsage: (u) => { adapter.usage = u; },
         });
-        for (const line of adapter.finish()) res.write(line);
-        res.end();
+        for (const line of adapter.finish()) write(line);
+        try { res.end(); } catch { /* already closed */ }
       } catch {
         try {
-          for (const line of adapter.finish()) res.write(line);
+          for (const line of adapter.finish()) write(line);
           res.end();
-        } catch { res.end(); }
+        } catch { /* already closed */ }
       }
       return;
     }

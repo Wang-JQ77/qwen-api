@@ -14,6 +14,14 @@ import { startServer } from './server-core.js';
 
 config(); // load .env when present
 
+// A stateless HTTP proxy must not die from a stray async error: log and keep serving.
+process.on('uncaughtException', (e) => {
+  console.error('[qwen-api] uncaughtException (service kept alive):', e?.stack || e);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[qwen-api] unhandledRejection (service kept alive):', e?.stack || e);
+});
+
 let handle;
 try {
   handle = startServer({});
