@@ -119,6 +119,97 @@ async function testAnthropic(label, messages, system) {
   console.log(`         thinking=${thinkingOut.length} chars, text=${textOut.length} chars, stop_reason=${stopReason}`);
 }
 
+const WEATHER_TOOL_ANTH = {
+  name: 'get_weather',
+  description: '查询指定城市的天气',
+  input_schema: { type: 'object', properties: { city: { type: 'string', description: '城市名' } }, required: ['city'] },
+};
+const WEATHER_TOOL_OAI = {
+  type: 'function',
+  function: { name: 'get_weather', description: '查询指定城市的天气', parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } },
+};
+
+async function testOpenAITools(label) {
+  console.log(`\n[openai] ${label}`);
+  const { res, text } = await post('/v1/chat/completions', {
+    model, stream: true, tools: [WEATHER_TOOL_OAI],
+    messages: [{ role: 'user', content: '今天北京的天气怎么样？用 get_weather 查' }],
+  });
+  check('HTTP 200', res.status === 200, `status=${res.status}`);
+  const chunks = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (payload === '[DONE]') continue;
+    try { chunks.push(JSON.parse(payload)); } catch { /* skip */ }
+  }
+  const tcs = chunks.map(c => c.choices?.[0]?.delta?.tool_calls ?? []).flat();
+  const fr = chunks.find(c => c.choices?.[0]?.finish_reason)?.choices[0].finish_reason;
+  check('tool_calls fragments received', tcs.length > 0, `${tcs.length}`);
+  check('finish_reason is tool_calls', fr === 'tool_calls', String(fr));
+  const byIdx = new Map();
+  for (const tc of tcs) {
+    const acc = byIdx.get(tc.index ?? 0) || { id: '', name: '', args: '' };
+    if (tc.id) acc.id = tc.id;
+    if (tc.function?.name) acc.name = tc.function.name;
+    if (tc.function?.arguments) acc.args += tc.function.arguments;
+    byIdx.set(tc.index ?? 0, acc);
+  }
+  const first = [...byIdx.values()][0];
+  check('tool call complete (id/name/args)', !!(first?.id && first?.name && first?.args?.includes('北京')), JSON.stringify(first).substring(0, 80));
+
+  // follow-up turn carrying the tool result back to the model
+  const { res: res2, text: text2 } = await post('/v1/chat/completions', {
+    model, stream: true, tools: [WEATHER_TOOL_OAI],
+    messages: [
+      { role: 'user', content: '今天北京的天气怎么样？用 get_weather 查' },
+      { role: 'assistant', content: '', tool_calls: [{ id: first.id, type: 'function', function: { name: 'get_weather', arguments: '{"city":"北京"}' } }] },
+      { role: 'tool', tool_call_id: first.id, content: '{"weather":"晴","temperature":25}' },
+      { role: 'user', content: '根据工具结果回答，北京天气如何？只回答一句话' },
+    ],
+  });
+  check('follow-up HTTP 200', res2.status === 200, `status=${res2.status}`);
+  let out2 = '';
+  for (const line of text2.split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (payload === '[DONE]') continue;
+    try { const d = JSON.parse(payload).choices?.[0]?.delta?.content; if (d) out2 += d; } catch { /* skip */ }
+  }
+  check('follow-up uses the tool result', out2.includes('晴'), JSON.stringify(out2.substring(0, 60)));
+}
+
+async function testAnthropicTools(label) {
+  console.log(`\n[anthropic] ${label}`);
+  const { res, text } = await post('/v1/messages', {
+    model, max_tokens: 300, stream: true, tools: [WEATHER_TOOL_ANTH],
+    messages: [{ role: 'user', content: '今天北京的天气怎么样？用 get_weather 查' }],
+  });
+  check('HTTP 200', res.status === 200, `status=${res.status}`);
+  const events = parseSse(text);
+  const toolStart = events.find(e => e.data?.type === 'content_block_start' && e.data.content_block?.type === 'tool_use');
+  const jsonDeltas = events.filter(e => e.data?.type === 'content_block_delta' && e.data.delta?.type === 'input_json_delta');
+  const stopReason = events.find(e => e.data?.type === 'message_delta')?.data?.delta?.stop_reason;
+  check('tool_use block started', !!toolStart, JSON.stringify(toolStart?.data?.content_block ?? {}).substring(0, 80));
+  check('input_json_delta fragments received', jsonDeltas.length > 0, `${jsonDeltas.length}`);
+  check('stop_reason is tool_use', stopReason === 'tool_use', String(stopReason));
+
+  const toolId = toolStart?.data?.content_block?.id ?? '';
+  const { res: res2, text: text2 } = await post('/v1/messages', {
+    model, max_tokens: 300, stream: true, tools: [WEATHER_TOOL_ANTH],
+    messages: [
+      { role: 'user', content: '今天北京的天气怎么样？用 get_weather 查' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'get_weather', input: { city: '北京' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: '{"weather":"晴","temperature":25}' }] },
+      { role: 'user', content: '根据工具结果回答，北京天气如何？只回答一句话' },
+    ],
+  });
+  check('follow-up HTTP 200', res2.status === 200, `status=${res2.status}`);
+  const events2 = parseSse(text2);
+  const out2 = events2.filter(e => e.data?.type === 'content_block_delta' && e.data.delta?.type === 'text_delta').map(e => e.data.delta.text).join('');
+  check('follow-up uses the tool result', out2.includes('晴'), JSON.stringify(out2.substring(0, 60)));
+}
+
 async function testOpenAI(label, messages) {
   console.log(`\n[openai] ${label}`);
   const { res, text } = await post('/v1/chat/completions', { model, stream: true, messages });
@@ -149,6 +240,10 @@ console.log(`target: ${base}  model: ${model}`);
 await testAnthropic('single turn, no thinking', [{ role: 'user', content: '回复两个字：好的' }]);
 await testAnthropic('single turn, system prompt', [{ role: 'user', content: '9*9等于几？只输出算式和结果' }], '你是一个简洁的计算器');
 await testOpenAI('single turn', [{ role: 'user', content: '回复两个字：好的' }]);
+
+// tool use — the thing agent clients need to keep working turn after turn
+await testOpenAITools('tool call + result round trip');
+await testAnthropicTools('tool call + result round trip');
 
 if (!quick) {
   const turns = [

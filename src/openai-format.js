@@ -29,10 +29,14 @@ export function openaiToQwenworkMessages(messages) {
       out.push({ role: 'user', content: blocks });
     } else if (role === 'assistant') {
       const text = contentToText(msg.content);
-      out.push({ role: 'assistant', content: [{ type: 'text', text }] });
+      const entry = { role: 'assistant', content: [{ type: 'text', text }] };
+      // the upstream speaks OpenAI-style tool_calls on the message itself
+      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+        entry.tool_calls = msg.tool_calls;
+      }
+      out.push(entry);
     } else if (role === 'tool') {
-      // merge tool results into a user turn so the model sees them
-      out.push({ role: 'user', content: [{ type: 'text', text: `[tool result] ${contentToText(msg.content)}` }] });
+      out.push({ role: 'tool', tool_call_id: msg.tool_call_id ?? '', content: contentToText(msg.content) });
     }
   }
   return out;
@@ -60,9 +64,10 @@ function contentToText(content) {
 }
 
 /** Shape an OpenAI non-stream response from accumulated parts. */
-export function buildOpenAIResponse({ id, model, content, reasoning, usage, finishReason }) {
+export function buildOpenAIResponse({ id, model, content, reasoning, usage, finishReason, toolCalls }) {
   const message = { role: 'assistant', content };
   if (reasoning) message.reasoning_content = reasoning;
+  if (toolCalls && toolCalls.length > 0) message.tool_calls = toolCalls;
   return {
     id,
     object: 'chat.completion',

@@ -24,7 +24,7 @@ import * as qaw from './qoder-wasm.js';
 import { resolveConfig, CredentialManager } from './credentials.js';
 import { QwenWorkClient, normalizeModelKey, DEFAULT_MODELS } from './qwenwork-client.js';
 import { openaiToQwenworkMessages, buildOpenAIResponse, buildOpenAIStreamChunk } from './openai-format.js';
-import { anthropicToQwenworkMessages, buildAnthropicResponse, AnthropicStreamAdapter } from './anthropic-format.js';
+import { anthropicToQwenworkMessages, anthropicToolsToOpenAI, buildAnthropicResponse, AnthropicStreamAdapter, mapStopReason } from './anthropic-format.js';
 
 function findBundledWasm() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -192,7 +192,13 @@ export function startServer(options = {}) {
 
     let upstream;
     try {
-      upstream = await client.infer({ modelKey, modelConfig, messages });
+      upstream = await client.infer({
+        modelKey,
+        modelConfig,
+        messages,
+        tools: body.tools,
+        toolChoice: body.tool_choice,
+      });
     } catch (e) {
       return res.status(502).json({ error: { message: `upstream error: ${e.message}`, type: 'api_error' } });
     }
@@ -243,6 +249,7 @@ export function startServer(options = {}) {
             if (delta.content) outDelta.content = delta.content;
             if (delta.reasoning_content) outDelta.reasoning_content = delta.reasoning_content;
             if (delta.role) outDelta.role = delta.role;
+            if (delta.tool_calls) outDelta.tool_calls = delta.tool_calls;
             if (Object.keys(outDelta).length === 0 && !finishReason) return;
             if (finishReason) stopReasonSent = true;
             const outChunk = buildOpenAIStreamChunk({ id, model: modelKey, delta: outDelta, finishReason });
@@ -268,8 +275,9 @@ export function startServer(options = {}) {
     // non-stream: accumulate
     let content = '';
     let reasoning = '';
-    let finishReason = 'stop';
+    let finishReason = null;
     let usage = null;
+    const toolAcc = new Map(); // tool stream index -> { id, name, arguments }
     try {
       const r = await client.consumeSSE(upstream, {
         onChunk: (chunk) => {
@@ -278,6 +286,16 @@ export function startServer(options = {}) {
           if (c.delta?.content) content += c.delta.content;
           if (c.delta?.reasoning_content) reasoning += c.delta.reasoning_content;
           if (c.finish_reason) finishReason = c.finish_reason;
+          if (Array.isArray(c.delta?.tool_calls)) {
+            for (const tc of c.delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              const acc = toolAcc.get(idx) || { id: '', name: '', arguments: '' };
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.name = tc.function.name;
+              if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+              toolAcc.set(idx, acc);
+            }
+          }
         },
         onUsage: (u) => { usage = u; },
       });
@@ -285,7 +303,13 @@ export function startServer(options = {}) {
     } catch (e) {
       return res.status(502).json({ error: { message: `upstream stream error: ${e.message}`, type: 'api_error' } });
     }
-    res.json(buildOpenAIResponse({ id, model: modelKey, content, reasoning, usage, finishReason }));
+    const toolCalls = [...toolAcc.values()].map(a => ({
+      id: a.id,
+      type: 'function',
+      function: { name: a.name, arguments: a.arguments },
+    }));
+    if (!finishReason) finishReason = toolCalls.length > 0 ? 'tool_calls' : 'stop';
+    res.json(buildOpenAIResponse({ id, model: modelKey, content, reasoning, usage, finishReason, toolCalls }));
   });
 
   // ---- Anthropic messages ----
@@ -303,7 +327,12 @@ export function startServer(options = {}) {
 
     let upstream;
     try {
-      upstream = await client.infer({ modelKey, modelConfig, messages });
+      upstream = await client.infer({
+        modelKey,
+        modelConfig,
+        messages,
+        tools: anthropicToolsToOpenAI(body.tools),
+      });
     } catch (e) {
       return res.status(502).json({ error: { type: 'api_error', message: `upstream error: ${e.message}` } });
     }
@@ -336,6 +365,7 @@ export function startServer(options = {}) {
             const d = {};
             if (delta.content) d.content = delta.content;
             if (delta.reasoning_content) d.reasoning_content = delta.reasoning_content;
+            if (delta.tool_calls) d.tool_calls = delta.tool_calls;
             if (choice.finish_reason) d.finish_reason = choice.finish_reason;
             if (Object.keys(d).length === 0) return;
             for (const block of adapter.push(d)) write(block);
@@ -356,6 +386,8 @@ export function startServer(options = {}) {
     let content = '';
     let reasoning = '';
     let usage = null;
+    let finishReason = null;
+    const toolAcc = new Map(); // tool stream index -> { id, name, arguments }
     try {
       const r = await client.consumeSSE(upstream, {
         onChunk: (chunk) => {
@@ -363,6 +395,17 @@ export function startServer(options = {}) {
           if (!c) return;
           if (c.delta?.content) content += c.delta.content;
           if (c.delta?.reasoning_content) reasoning += c.delta.reasoning_content;
+          if (c.finish_reason) finishReason = c.finish_reason;
+          if (Array.isArray(c.delta?.tool_calls)) {
+            for (const tc of c.delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              const acc = toolAcc.get(idx) || { id: '', name: '', arguments: '' };
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.name = tc.function.name;
+              if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+              toolAcc.set(idx, acc);
+            }
+          }
         },
         onUsage: (u) => { usage = u; },
       });
@@ -370,7 +413,20 @@ export function startServer(options = {}) {
     } catch (e) {
       return res.status(502).json({ error: { type: 'api_error', message: `upstream stream error: ${e.message}` } });
     }
-    res.json(buildAnthropicResponse({ id, model: modelKey, content, reasoning, usage }));
+    const toolCalls = [...toolAcc.values()].map(a => ({
+      id: a.id,
+      type: 'function',
+      function: { name: a.name, arguments: a.arguments },
+    }));
+    res.json(buildAnthropicResponse({
+      id,
+      model: modelKey,
+      content,
+      reasoning,
+      usage,
+      stopReason: finishReason ? mapStopReason(finishReason) : null,
+      toolCalls,
+    }));
   });
 
   const server = app.listen(port, host, () => {

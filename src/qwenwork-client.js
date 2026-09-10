@@ -81,7 +81,7 @@ export class QwenWorkClient {
    * Sign and fire an inference request. `messages` are qwenwork-format
    * (role + Anthropic-style content blocks). Returns the fetch Response.
    */
-  async infer({ modelKey, modelConfig, messages, requestId, sessionId, signal }) {
+  async infer({ modelKey, modelConfig, messages, requestId, sessionId, signal, tools, toolChoice }) {
     const ctx = this.getContext();
     const now = Date.now();
     const reqId = requestId || `req-${now}-${crypto.randomBytes(4).toString('hex')}`;
@@ -94,6 +94,8 @@ export class QwenWorkClient {
       messages,
       business: { id: '', product: 'qoder_work', type: 'agent' },
     };
+    if (tools && Array.isArray(tools) && tools.length > 0) bodyObj.tools = tools;
+    if (toolChoice) bodyObj.tool_choice = toolChoice;
     const bodyJson = JSON.stringify(bodyObj);
     const rr = ctx.prepareInferRequest(this.gateway, bodyJson, modelKey, modelConfig?.source || 'system');
     try {

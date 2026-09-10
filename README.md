@@ -22,6 +22,8 @@ Claude Code / Cursor / Cline / 任意 OpenAI 兼容客户端
 | `flash` | Qwen3.8-Flash | **0.1** | 最便宜，日常任务首选 |
 | `qwen3.8-max-preview` | 通义千问 Max | 1.1 | 千问旗舰，支持视觉 |
 
+> **工具调用（tool use）完整支持**：OpenAI `tools`/`tool_calls`/`tool` 角色与 Anthropic `tools`/`tool_use`/`tool_result` 双向透传，agent 客户端（Claude Code、Cursor、Cline 等）可以连续多轮调用工具完成任务，不会"答一句就停"。
+
 ## 快速开始
 
 ### 前置要求
